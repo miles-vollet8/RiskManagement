@@ -1,150 +1,191 @@
-import streamlit as st
 from scholes import *
-st.title("Black-Scholes Model")
-st.write("Find european option prices and sensitivities with the Black-Scholes formula")
+from risk import *
+import plotly.graph_objects as go
+import streamlit as st
 
-st.markdown("""
-<style>
-.metric-container {
-    display: flex;
-    justify-content: center; /* centers text */
-    padding: 8px;  /* gives some space around text */ 
-    width: auto;     margin: 0 auto; /* center container */
-    }
-.metric-call{
-            background-color: #90EE90; 
-            color: black;
-            margin-right: 10px;
-            border-radius: 10px;
-            }    
-.metric-put{
-            background-color: #FF6347;
-            color: black;
-            border-radius: 10px;
-            }
+st.title("Option Position Builder")
+if 'positions' not in st.session_state:
+    st.session_state.positions = []
+if 'edit_leg_index' not in st.session_state:
+    st.session_state.edit_leg_index = None
 
-.metric-label{
-            font-size: 1rem;
+st.sidebar.header("Market Scenario")
+current_price = st.sidebar.number_input("Current Underlying Price", value=100.0, step=1.0)
+current_vol = st.sidebar.number_input("Current Volatility", value=0.2, step=0.01)
+time_passed = st.sidebar.number_input("Time Passed (Years)", value=0.0, step=0.01)
+interest_rate = st.sidebar.number_input("Interest Rate", value=RATE, step=0.001)
 
-            } 
-.metric-value{
-            font-size: 1.5rem; /* makes option values more prominent */
-            font-weight: bold; 
-            }                                   
-            </style>
-            """, unsafe_allow_html=True)
+st.sidebar.header("Add a Leg")
+
+leg_type = st.sidebar.radio("Leg Type", ("Option Leg", "Stock Leg"))
+
+if leg_type == "Option Leg":
+    col1, col2 = st.sidebar.columns(2)
+    leg_contracts = col1.number_input("Contracts (negative for short)", value=-1, step=1)
+    strike = col2.number_input("Strike Price", value=100.0, step=5.0)
+    expiry = st.sidebar.number_input("Time to Expiry (Years)", value=0.5, step=0.01)
+    initial_iv = st.sidebar.number_input("Initial IV", value=current_vol, step=0.01)
+    option_type = st.sidebar.radio("Option Type", ("call", "put"))
+elif leg_type == "Stock Leg":
+    shares = st.sidebar.number_input("Shares (negative for short)", value=100, step=1)
+    entry_price = st.sidebar.number_input("Entry Price", value=current_price)
+
+if st.sidebar.button("Add Leg"):
+    if leg_type == "Option Leg":
+        add_leg(st.session_state.positions, leg_contracts, current_price, strike, expiry, initial_iv, interest_rate, option_type)
+        st.sidebar.success(f"Added Option Leg: {leg_contracts} contracts, Strike {strike}, Expiry {expiry}, IV {initial_iv}, Type {option_type}.")
+        
+    else:
+        add_stock_leg(st.session_state.positions, shares, entry_price)
+        st.sidebar.success(f"Added Stock Leg: {shares} shares at {entry_price}.")
+
+# ----------------------------------------
+# Display the list of legs with Remove option
+# ----------------------------------------
+st.subheader("Legs Added")
+if st.session_state.positions:
+    for i, leg in enumerate(st.session_state.positions):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            if leg.instrument == "option":
+                st.write(f"**Leg {i+1} (Option)** | Type: {leg.option_type} | Contracts: {leg.contracts} | Strike: {int(leg.strike)} | Expiry: {float(leg.time):.2f} | IV: {float(leg.initial_iv):.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
+            else:
+                st.write(f"**Leg {i+1} (Stock)** | Shares: {leg.shares} | Entry Price: {float(leg.entry_price):.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
+        
+        with col2:
+            if st.button("Remove", key=f"remove_{i}"):
+                st.session_state.positions.pop(i)
+                st.stop()
+else:
+    st.info("No legs added yet.")
+
+# ----------------------------------------
+# Total Position Summary: Debit/Credit and Greeks
+# ----------------------------------------
+has_option_legs = any(leg.instrument == "option" for leg in st.session_state.positions)
+
+st.subheader("Total Position Summary")
+if st.session_state.positions:
+    total_cash = sum(leg.cash_flow for leg in st.session_state.positions)
+    st.write("**Total Debit/Credit:**", f"{total_cash:.2f}")
+
+    if has_option_legs:
+        total_delta, total_gamma, total_vega, total_theta, total_rho = position_greeks(
+            st.session_state.positions, current_price, current_vol, time_passed, interest_rate
+        )
+        st.write("**Total Delta:**", f"{total_delta:.2f}")
+        st.write("**Total Gamma:**", f"{total_gamma:.2f}")
+        st.write("**Total Vega:**", f"{total_vega:.2f}")
+        st.write("**Total Theta:**", f"{total_theta:.2f}")
+        st.write("**Total Rho:**", f"{total_rho:.2f}")
+    else:
+        total_delta = sum(leg.shares * 0.01 for leg in st.session_state.positions if leg.instrument == 'stock')
+        st.write("**Total Delta:**", f"{total_delta:.2f}")
+        st.write("**Total Gamma:** 0.00")
+        st.write("**Total Vega:** 0.00")
+        st.write("**Total Theta:** 0.00")
+        st.write("**Total Rho:** 0.00")
+else:
+    st.write("No positions to summarize.")
+#st.write(f"{FLAG=}")
+
+# ----------------------------------------
+# Graph Settings
+# ----------------------------------------
+
+axis_map = {
+    "Underlying": "underlying",
+    "Volatility": "vol",
+    "Time passed (in Years)": "time",
+    "Interest Rate": "interest_rate",
+    "PnL": "pnl",
+    "Delta": "delta",
+    "Gamma": "gamma",
+    "Theta": "theta",
+    "Vega": "vega",
+    "Rho": "rho",
+    "None": "none"
+}
+
+num_graphs = st.selectbox("Number of Graphs", [1, 2, 3], index=0)
+
+graph_settings = []
+
+for graph_num in range(1, num_graphs + 1):
+    st.header(f"Graph Settings (Graph {graph_num})")
+    col_x, col_y, col_line = st.columns(3)
+
+    with col_x:
+        x_axis = st.selectbox(
+            f"X-axis (Graph {graph_num})",
+            options=["Underlying", "Volatility", "Time passed (in Years)", "Interest Rate"],
+            index=0,
+            key=f"x_axis_{graph_num}"
+        )
+    with col_y:
+        y_axis = st.selectbox(
+            f"Y-axis (Graph {graph_num})",
+            options=["PnL", "Delta", "Gamma", "Theta", "Vega", "Rho"],
+            index=0,
+            key=f"y_axis_{graph_num}"
+        )
+    with col_line:
+        line_choice = st.selectbox(
+            f"Extra Line (Graph {graph_num})",
+            options=["None", "Underlying", "Volatility", "Time passed (in Years)", "Interest Rate"],
+            index=0,
+            key=f"line_choice_{graph_num}"
+        )
+
+ 
+    if x_axis == "Underlying":
+        x_min = st.number_input(f"X-axis minimum (Graph {graph_num}, -1 for default values)", value=-1, step=1, key=f"x_min_{graph_num}")
+        x_max = st.number_input(f"X-axis maximum (Graph {graph_num}, -1 for default values)", value=-1, step=1, key=f"x_max_{graph_num}")
+    else:
+        x_min = st.number_input(f"X-axis minimum (Graph {graph_num}, -1 for default values)", value=-1.0, step=0.01, key=f"x_min_{graph_num}")
+        x_max = st.number_input(f"X-axis maximum (Graph {graph_num}, -1 for default values)", value=-1.0, step=0.01, key=f"x_max_{graph_num}")
 
 
+    line_min, line_max = -1, -1
+    if line_choice != "None":
+        if line_choice == "Underlying":
+            line_min = st.number_input(f"Line minimum (Graph {graph_num}, -1 for default values)", value=-1, step=1, key=f"line_min_{graph_num}")
+            line_max = st.number_input(f"Line maximum (Graph {graph_num}, -1 for default values)", value=-1, step=1, key=f"line_max_{graph_num}")
+        else:
+            line_min = st.number_input(f"Line minimum (Graph {graph_num}, -1 for default values)", value=-1.0, step=0.01, key=f"line_min_{graph_num}")
+            line_max = st.number_input(f"Line maximum (Graph {graph_num}, -1 for default values)", value=-1.0, step=0.01, key=f"line_max_{graph_num}")
 
+    graph_settings.append({
+        "x_axis": axis_map[x_axis],
+        "y_axis": axis_map[y_axis],
+        "line_choice": axis_map[line_choice],
+        "x_min": x_min,
+        "x_max": x_max,
+        "line_values": [] if line_choice == "None" or line_min == -1 or line_max == -1 else [line_min, line_max]
+    })
 
+scenario = {
+    'underlying': current_price,
+    'vol': current_vol,
+    'time': time_passed,
+    'interest_rate': interest_rate
+}
 
-with st.sidebar:
-    st.title("Black-Scholes Model")
-    st.markdown(
-    '''
-    Created By:
-    <a href="https://www.linkedin.com/in/miles-vollet-9044a1314/" target="_blank"> 
-        <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" alt="LinkedIn" width="20" style="vertical-align: middle; margin-right: 5px;">
-    </a>
-    <a href="https://www.linkedin.com/in/miles-vollet-9044a1314/" target="_blank">
-        Miles Vollet
-    </a> 
-    ''', #linkedin plug
-    unsafe_allow_html=True)
+if st.button("Plot Graphs"):
+    for idx, settings in enumerate(graph_settings, start=1):
+        fig = plot_graph(
+            st.session_state.positions,
+            settings["x_axis"],
+            settings["y_axis"],
+            settings["line_choice"],
+            scenario,
+            settings["x_min"],
+            settings["x_max"],
+            num_points=100,
+            line_values=settings["line_values"]
+        )
 
-    S = st.sidebar.number_input("Current Asset Price(S)", min_value=0.0, value=100.00, step=1.0) #allows user inputs
-    K = st.sidebar.number_input("Strike Price(K)", min_value=0.0, value=100.00, step=1.0)
-    time = st.sidebar.number_input("Time to Expiry (in years)", min_value=0.0, value=1.00, step=0.01)
-    vol = st.sidebar.number_input("Volatility(σ)", min_value=0.0, value=.25, step=0.01)
-    r= st.sidebar.number_input("Risk-Free Interest Rate", value=.05, step=0.01)
-
-    st.markdown("---")
-    surface_gen = st.button("Generate Surface")
-    
-    min_price = st.number_input('Minimum Asset Price', min_value=0.01, value=S*.75, step=1.0)
-    max_price = st.number_input("Maximum Asset Price", min_value=0.01, value=S*1.25, step=1.0)
-    min_vol = st.number_input("Minimum Volatility", min_value=0.0, value=vol*.25, step=0.01)
-    max_vol = st.number_input("Maximum Volatility", min_value=0.01, value=vol*1.75, step = 0.01)
-    price_range = np.linspace(min_price, max_price, 100)
-    vol_range = np.linspace(min_vol, max_vol, 100)
-
-
-call_val = call_pricer(S,K,time,vol,r) #calculations
-d1 = d1_calc(S, K, time, vol, r)
-d2 = d2_calc(d1, vol, time)
-call_delta = call_delta_calc(d1)
-put_delta = put_delta_calc(d1)
-gamma = gamma_calc(d1, S, vol, time)
-theta = theta_calc(d1, d2, S, K, time, vol, r)
-vega = vega_calc(d1, S, time)
-call_rho = call_rho_calc(K, time, r, d2)
-put_rho = put_rho_calc(K, time, r, d2)
-put_val = put_pricer(S,K,time,vol,r)
-col1, col2 = st.columns([1,1]) #sets up call and put columns
-
-with col1:
-    st.markdown("""
-    <style>
-    /* Adjust column widths */
-    .css-1lcbmhc { width: 48% !important; }
-    .css-1q9ozre { width: 48% !important; }
-    .css-1kyxreq { margin-left: 1% !important; }
-    </style>
-    """, unsafe_allow_html=True)
-    st.markdown(f"""
-                <div class="metric-container metric-call">
-    <div>
-        <div class="metric-label">Call Value</div>
-        <div class="metric-value">${call_val:.2f}</div>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.write(f"**Delta(Δ)**: {call_delta:.4f}") #displays greeks
-    st.write(f"**Gamma(Γ)**: {gamma:.4f}")
-    st.write(f"**Theta(Θ)**: {theta:.4f}")
-    st.write(f"**Vega(ν)**: {vega:.4f}")
-    st.write(f"**Rho(ρ)**: {call_rho:.4f}")
-    
-    
-with col2:
-    st.markdown("""
-    <style>
-    /* Adjust column widths */
-    .css-1lcbmhc { width: 48% !important; }
-    .css-1q9ozre { width: 48% !important; }
-    .css-1kyxreq { margin-left: 1% !important; }
-    </style>
-    """, unsafe_allow_html=True)
-    st.markdown(f"""
-        <div class="metric-container metric-put">
-            <div>
-                <div class="metric-label">Put Value</div>
-                <div class="metric-value">${put_val:.2f}</div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-    st.write(f"**Delta(Δ)**: {put_delta:.4f}")
-    st.write(f"**Gamma(Γ)**: {gamma:.4f}")
-    st.write(f"**Theta(Θ)**: {theta:.4f}")
-    st.write(f"**Vega(ν)**: {vega:.4f}")
-    st.write(f"**Rho(ρ)**: {put_rho:.4f}")
-    
-            
-st.markdown("---")
-st.title("Option Price Interactive Surface")
-st.write("See how Option Prices(Z) fluctuate depending on Volatility(Y) and Underlying Asset changes(X)")
-col1, col2 = st.columns([1,1])
-with col1:
-    st.subheader("Call Option")
-    call_surface = call_surface_calc(K, time, r, min_vol, max_vol, min_price, max_price)
-    st.plotly_chart(call_surface) #plot call surface
-
-with col2:
-    st.subheader("Put Option")
-    put_surface = put_surface_calc(K, time, r, min_vol, max_vol, min_price, max_price)
-    st.plotly_chart(put_surface) #plot put surface
-
-
-
-
+        if fig:
+            st.subheader(f"Graph {idx}")
+            st.plotly_chart(fig, use_container_width=True)
 
