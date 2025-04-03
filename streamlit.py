@@ -45,7 +45,7 @@ if st.sidebar.button("Add Leg"):
 st.subheader("Legs Added")
 if st.session_state.positions:
     for i, leg in enumerate(st.session_state.positions):
-        col1, col2 = st.columns([4, 1])
+        col1, col2, col3 = st.columns([4, 1, 1])
         with col1:
             if leg.instrument == "option":
                 st.write(f"**Leg {i+1} (Option)** | Type: {leg.option_type} | Contracts: {leg.contracts} | Strike: {int(leg.strike)} | Expiry: {float(leg.time):.2f} | IV: {float(leg.initial_iv):.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
@@ -56,6 +56,23 @@ if st.session_state.positions:
             if st.button("Remove", key=f"remove_{i}"):
                 st.session_state.positions.pop(i)
                 st.stop()
+        with col3:
+            if st.button("Greeks", key=f"show_{i}"):
+                if leg.instrument == "option":
+                    remaining_time = max(leg.time - time_passed, 0)
+                    delta, gamma, vega, theta, rho = current_leg_greeks(
+                        leg, current_price, remaining_time, current_vol, interest_rate
+                    )
+                    st.write(f"**Leg {i+1} Greeks:**")
+                    st.write(f"Delta: {delta:.2f}")
+                    st.write(f"Gamma: {gamma:.2f}")
+                    st.write(f"Vega: {vega:.2f}")
+                    st.write(f"Theta: {theta:.2f}")
+                    st.write(f"Rho: {rho:.2f}")
+                else:
+                    delta = 0.01*leg.shares
+                    st.write(f"**Stock Leg {i+1} Greeks:**")
+                    st.write(f"Delta: {delta:.2f}")
 else:
     st.info("No legs added yet.")
 
