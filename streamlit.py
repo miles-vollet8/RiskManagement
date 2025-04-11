@@ -25,6 +25,7 @@ if leg_type == "Option Leg":
     strike = col2.number_input("Strike Price", value=100.0, step=5.0)
     expiry = st.sidebar.number_input("Time to Expiry (Years)", value=0.5, step=0.01)
     initial_iv = st.sidebar.number_input("Initial IV", value=current_vol, step=0.01)
+    entry_price = st.sidebar.number_input('Underlying Entry Price', value=current_price, step=1.00)
     option_type = st.sidebar.radio("Option Type", ("call", "put"))
 elif leg_type == "Stock Leg":
     shares = st.sidebar.number_input("Shares (negative for short)", value=100, step=1)
@@ -32,7 +33,7 @@ elif leg_type == "Stock Leg":
 
 if st.sidebar.button("Add Leg"):
     if leg_type == "Option Leg":
-        add_leg(st.session_state.positions, leg_contracts, current_price, strike, expiry, initial_iv, interest_rate, option_type)
+        add_leg(st.session_state.positions, leg_contracts, entry_price, strike, expiry, initial_iv, interest_rate, option_type)
         st.sidebar.success(f"Added Option Leg: {leg_contracts} contracts, Strike {strike}, Expiry {expiry}, IV {initial_iv}, Type {option_type}.")
         
     else:
@@ -48,7 +49,7 @@ if st.session_state.positions:
         col1, col2, col3 = st.columns([4, 1, 1])
         with col1:
             if leg.instrument == "option":
-                st.write(f"**Leg {i+1} (Option)** | Type: {leg.option_type} | Contracts: {leg.contracts} | Strike: {int(leg.strike)} | Expiry: {float(leg.time):.2f} | IV: {float(leg.initial_iv):.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
+                st.write(f"**Leg {i+1} (Option)** | Type: {leg.option_type} | Contracts: {leg.contracts} | Strike: {int(leg.strike)} | Expiry: {float(leg.time):.2f} | IV: {float(leg.initial_iv):.2f} | Entry: {leg.initial_S:.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
             else:
                 st.write(f"**Leg {i+1} (Stock)** | Shares: {leg.shares} | Entry Price: {float(leg.entry_price):.2f} | Cash Flow: {float(leg.cash_flow):.2f}")
         
@@ -85,7 +86,8 @@ st.subheader("Total Position Summary")
 if st.session_state.positions:
     total_cash = sum(leg.cash_flow for leg in st.session_state.positions)
     st.write("**Total Debit/Credit:**", f"{total_cash:.2f}")
-
+    total_pnl = calc_pnl(st.session_state.positions, current_price, current_vol, time_passed, interest_rate)
+    st.write("**Total P&L:**", f"{total_pnl:.2f}")
     if has_option_legs:
         total_delta, total_gamma, total_vega, total_theta, total_rho = position_greeks(
             st.session_state.positions, current_price, current_vol, time_passed, interest_rate
