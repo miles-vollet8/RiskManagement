@@ -43,7 +43,7 @@ if st.sidebar.button("Add Leg"):
 # ----------------------------------------
 # Display the list of legs with Remove option
 # ----------------------------------------
-st.subheader("Legs Added")
+st.subheader("Positions")
 if st.session_state.positions:
     for i, leg in enumerate(st.session_state.positions):
         col1, col2, col3 = st.columns([4, 1, 1])
