@@ -279,7 +279,7 @@ def position_greeks(positions, S=-1, vol=-1, time=0, r=-1):
         if leg.instrument == 'stock':
             
             cdelta = .01*leg.shares
-            delta = delta + cdelta
+        
             cgamma, cvega, ctheta, crho = 0, 0, 0, 0
             if leg.shares<0:
                 cdelta = cdelta*-1
